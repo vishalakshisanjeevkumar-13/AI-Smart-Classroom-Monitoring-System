@@ -5,9 +5,6 @@ venv/
 .env
 
 logs/
-screenshots/
-*.jpg
-*.png
 
 attendance_log.csv
 
