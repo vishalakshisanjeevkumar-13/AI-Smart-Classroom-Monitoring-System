@@ -1,0 +1,11 @@
+2026-07-12 16:33:05
+
+===== SESSION SUMMARY =====
+Runtime:            1.1 min
+Peak present:       1
+Avg present (recent window): 1.0
+Total alert events: 8
+CSV log:            classroom_logs\2026-07-12\attendance_log.csv
+Screenshots folder: classroom_logs\2026-07-12\screenshots
+============================
+
