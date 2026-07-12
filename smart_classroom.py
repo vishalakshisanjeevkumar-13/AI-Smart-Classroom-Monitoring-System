@@ -1,21 +1,8 @@
 #!/usr/bin/env python3
 """
-================================================================================
- AI SMART CLASSROOM MONITORING SYSTEM
-================================================================================
-A real-time computer-vision dashboard that watches a classroom feed (webcam
-or video file) and reports:
+AI Smart Classroom Monitoring System
 
-    - Live student presence / absence counting (no double-counting of the
-      same student across frames or overlapping boxes)
-    - Detection of chairs, laptops, backpacks, bottles, phones and TVs/monitors
-    - A live dashboard overlay (LIVE badge, clock, ROI box, status bar,
-      color legend)
-    - Automatic timestamped screenshots on important events
-    - CSV attendance logging for later analysis
-    - Alert banners for an empty room, low attendance and overcrowding
-
-================================================================================
+Real-time classroom monitoring using YOLOv8.
 """
 
 import argparse
@@ -36,13 +23,8 @@ except ImportError as exc:  # pragma: no cover
         "Install it with: pip install ultralytics\n"
         f"(original error: {exc})"
     )
-
-# ==============================================================================
-# 1. CONFIGURATION
-# ==============================================================================
-
-# COCO class ids used by the pretrained YOLOv8 model that map to the objects
-# this project cares about. Each entry: name -> (coco_id, BGR color for boxes)
+# Configuration
+# COCO classes used in the project
 TRACKED_CLASSES = {
     "person":      (0,  (60, 200, 60)),     # green
     "chair":       (56, (0, 165, 255)),     # orange
@@ -54,9 +36,7 @@ TRACKED_CLASSES = {
 }
 COCO_ID_TO_NAME = {v[0]: k for k, v in TRACKED_CLASSES.items()}
 CLASS_IDS = [v[0] for v in TRACKED_CLASSES.values()]
-
-# Friendly labels shown in the UI (internal keys stay the same as the COCO
-# names above so tracking / CSV logic doesn't need to change).
+# Display labels
 DISPLAY_NAMES = {
     "person": "Student",
     "chair": "Chair",
@@ -67,20 +47,15 @@ DISPLAY_NAMES = {
     "tv": "TV/Monitor",
 }
 
-
 def display_name(internal_name: str) -> str:
     return DISPLAY_NAMES.get(internal_name, internal_name.title())
-
-# How many seconds a person-track must be "missing" before we drop them from
-# the currently-present count (smooths out momentary detection flicker).
+# Presence timeout
 PRESENCE_GRACE_SECONDS = 2.0
-
-# How long the room must show zero students before we raise "Class Empty".
+# Empty classroom alert delay
 EMPTY_ROOM_ALERT_SECONDS = 8.0
 
-
 def build_arg_parser() -> argparse.ArgumentParser:
-    """Command line configuration for the whole system (Phase 1)."""
+    """Create command-line arguments."""
     parser = argparse.ArgumentParser(description="AI Smart Classroom Monitoring System")
     parser.add_argument("--source", default="0",
                          help="Camera index (e.g. 0) or path to a video file. Default: 0")
@@ -106,13 +81,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
                          help="Run headless (no on-screen window); useful on servers.")
     return parser
 
-
-# ==============================================================================
-# 2. SMALL HELPERS
-# ==============================================================================
-
+#2. SMALL HELPERS
 def iou(box_a, box_b) -> float:
-    """Intersection-over-Union of two (x1, y1, x2, y2) boxes."""
+    """Calculate IoU."""
     xa1, ya1, xa2, ya2 = box_a
     xb1, yb1, xb2, yb2 = box_b
     inter_x1, inter_y1 = max(xa1, xb1), max(ya1, yb1)
@@ -123,7 +94,6 @@ def iou(box_a, box_b) -> float:
     area_b = max(0, xb2 - xb1) * max(0, yb2 - yb1)
     union = area_a + area_b - inter_area
     return inter_area / union if union > 0 else 0.0
-
 
 def deduplicate_boxes(boxes, class_ids, scores, track_ids, iou_thresh=0.6):
     """
@@ -148,18 +118,13 @@ def deduplicate_boxes(boxes, class_ids, scores, track_ids, iou_thresh=0.6):
                 keep[j] = False
     return keep
 
-
 def draw_transparent_rect(img, pt1, pt2, color, alpha=0.35):
     """Draw a semi-transparent filled rectangle (used for banners/panels)."""
     overlay = img.copy()
     cv2.rectangle(overlay, pt1, pt2, color, -1)
     cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0, img)
 
-
-# ==============================================================================
 # 3. THE MONITOR
-# ==============================================================================
-
 class SmartClassroomMonitor:
     """Owns the camera, the model, all tracked state, and dashboard drawing."""
 
@@ -167,7 +132,6 @@ class SmartClassroomMonitor:
         self.args = args
         self.model = YOLO(args.model)
 
-        # --- camera / video source (Phase 1) ---
         source = int(args.source) if args.source.isdigit() else args.source
         self.cap = cv2.VideoCapture(source)
         if not self.cap.isOpened():
@@ -175,24 +139,17 @@ class SmartClassroomMonitor:
         self.frame_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 1280
         self.frame_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 720
 
-        # --- classroom ROI: a comfortable inset box that represents the
-        #     area of the room being monitored (Phase 1) ---
         margin_x, margin_y = int(self.frame_w * 0.03), int(self.frame_h * 0.05)
         self.roi = (margin_x, margin_y, self.frame_w - margin_x, self.frame_h - margin_y)
 
-        # --- tracking state (Phase 2) ---
-        # track_id -> last_seen_timestamp
         self.person_last_seen = {}
-        # every distinct student track id ever observed this session
         self.all_time_student_ids = set()
 
-        # --- alerts / timers (Phase 3) ---
         self.empty_since = None
         self.last_screenshot_time = 0.0
         self.last_log_time = 0.0
         self.session_start = time.time()
 
-        # --- output locations ---
         self.screenshot_dir = "screenshots"
         os.makedirs(self.screenshot_dir, exist_ok=True)
         self.csv_path = "attendance_log.csv"
@@ -202,11 +159,9 @@ class SmartClassroomMonitor:
         self.fps_deque = deque(maxlen=30)
         self.prev_time = time.time()
 
-        # UI state - legend can be toggled off so it never blocks the view
-        # of the students being monitored (press 'l' while running)
         self.show_legend = True
 
-    # -------------------------------------------------------------- CSV ----
+    # CSV
     def _init_csv(self):
         is_new = not os.path.exists(self.csv_path)
         if is_new:
@@ -230,7 +185,7 @@ class SmartClassroomMonitor:
                 sum(counts.values()), status,
             ])
 
-    # --------------------------------------------------------- detection ---
+    # detection
     def detect(self, frame):
         """
         Runs YOLOv8 tracking on the frame. Returns:
@@ -244,7 +199,7 @@ class SmartClassroomMonitor:
             persist=True,
             classes=CLASS_IDS,
             conf=self.args.conf,
-            iou=self.args.iou,          # built-in NMS removes same-class overlaps
+            iou=self.args.iou,          
             verbose=False,
             tracker="bytetrack.yaml",
         )[0]
@@ -262,7 +217,6 @@ class SmartClassroomMonitor:
                 scores.append(float(s))
                 track_ids.append(tid)
 
-        # extra de-duplication pass (Phase 2 requirement: no overlap double counts)
         keep = deduplicate_boxes(boxes, class_ids, scores, track_ids)
         boxes = [b for b, k in zip(boxes, keep) if k]
         class_ids = [c for c, k in zip(class_ids, keep) if k]
@@ -270,7 +224,7 @@ class SmartClassroomMonitor:
         track_ids = [t for t, k in zip(track_ids, keep) if k]
         return boxes, class_ids, scores, track_ids
 
-    # -------------------------------------------------------- book keeping -
+    #book keeping
     def update_presence(self, class_ids, track_ids):
         """Update which student track ids are currently / recently present."""
         now = time.time()
@@ -279,7 +233,6 @@ class SmartClassroomMonitor:
                 self.person_last_seen[tid] = now
                 self.all_time_student_ids.add(tid)
 
-        # drop ids that haven't been seen within the grace window
         stale = [tid for tid, t in self.person_last_seen.items()
                  if now - t > PRESENCE_GRACE_SECONDS]
         for tid in stale:
@@ -299,7 +252,7 @@ class SmartClassroomMonitor:
             return "LOW ATTENDANCE", (0, 165, 255)
         return "NORMAL", (60, 200, 60)
 
-    # ----------------------------------------------------------- alerts ---
+    #alerts
     def check_alerts(self, present):
         now = time.time()
         alerts = []
@@ -343,8 +296,6 @@ class SmartClassroomMonitor:
             color = TRACKED_CLASSES.get(name, (255, 255, 255))[1]
             x1, y1, x2, y2 = box
 
-            # thicker, rounded-corner style box for students so they stand
-            # out from plain objects
             thickness = 3 if name == "person" else 2
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
 
@@ -359,9 +310,6 @@ class SmartClassroomMonitor:
             cv2.putText(frame, tag, (x1 + 4, y1 - 6),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 1, cv2.LINE_AA)
 
-            # a small "PRESENT" status chip under every student's box, so a
-            # student's attendance status is visible right on the video
-            # itself and never depends on the (sometimes cropped) bottom bar
             if name == "person":
                 chip = "PRESENT"
                 (cw, ch), _ = cv2.getTextSize(chip, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
@@ -401,7 +349,6 @@ class SmartClassroomMonitor:
         pad = 8
         chip_w = 14
 
-        # measure total width needed so the strip can be centered / wrapped
         items = [(display_name(name), color) for name, (_, color) in TRACKED_CLASSES.items()]
         widths = []
         for label, _ in items:
@@ -423,9 +370,7 @@ class SmartClassroomMonitor:
             x += w
 
     def draw_alert_banner(self, frame, alerts):
-        """Alerts live in their own strip near the TOP of the frame (right
-        under the legend), completely separate from the bottom status bar,
-        so the two never overlap or crowd each other out."""
+        """Display alert banner."""
         if not alerts:
             return
         text, color = alerts[0]
@@ -433,8 +378,6 @@ class SmartClassroomMonitor:
         banner_h = 34
         draw_transparent_rect(frame, (0, banner_y0), (self.frame_w, banner_y0 + banner_h), color, 0.6)
 
-        # auto-shrink the font if the text is wider than the frame, so it
-        # never gets clipped off the edge
         scale = 0.75
         (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, 2)
         while tw > self.frame_w - 40 and scale > 0.35:
@@ -445,9 +388,7 @@ class SmartClassroomMonitor:
                     cv2.FONT_HERSHEY_SIMPLEX, scale, (255, 255, 255), 2, cv2.LINE_AA)
 
     def draw_status_bar(self, frame, counts, present, absent, status, status_color, fps):
-        """Bottom bar. The font scale is chosen dynamically so that, no
-        matter how narrow the window/frame is, every segment (including
-        STATUS) fits on screen and is never cut off at the edge."""
+        """Draw the status bar."""
         bar_h = 54
         draw_transparent_rect(frame, (0, self.frame_h - bar_h), (self.frame_w, self.frame_h), (20, 20, 20), 0.65)
         total_objects = sum(counts.values())
@@ -471,7 +412,6 @@ class SmartClassroomMonitor:
                 w += tw + gap
             return w
 
-        # shrink the font until every segment fits inside the frame width
         scale = 0.55
         while total_width(scale) > self.frame_w and scale > 0.3:
             scale -= 0.03
@@ -483,7 +423,7 @@ class SmartClassroomMonitor:
             (tw, _), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
             x += tw + gap
 
-    # ------------------------------------------------------------- main ---
+    # main
     def run(self):
         print("Smart Classroom Monitor started. "
               "Press 'q' to quit, 's' for a manual screenshot, 'l' to toggle the legend.")
@@ -505,7 +445,6 @@ class SmartClassroomMonitor:
             status, status_color = self.attendance_status(present, absent)
             alerts = self.check_alerts(present)
 
-            # ---- draw everything ----
             self.draw_boxes(frame, boxes, class_ids, scores, track_ids)
             self.draw_roi(frame)
             self.draw_live_indicator(frame)
@@ -521,7 +460,6 @@ class SmartClassroomMonitor:
             self.draw_status_bar(frame, counts, present, absent, status, status_color, fps)
             self.draw_alert_banner(frame, alerts)
 
-            # ---- side effects: logging / screenshots ----
             self.maybe_log(counts, present, absent, status)
             if alerts:
                 self.maybe_screenshot(frame, reason=alerts[0][0])
@@ -543,17 +481,12 @@ class SmartClassroomMonitor:
         print(f"Session ended. Unique students seen this session: "
               f"{len(self.all_time_student_ids)}. Log saved to {self.csv_path}")
 
-
-# ==============================================================================
 # 4. ENTRY POINT
-# ==============================================================================
-
 def main():
     parser = build_arg_parser()
     args = parser.parse_args()
     monitor = SmartClassroomMonitor(args)
     monitor.run()
-
 
 if __name__ == "__main__":
     main()
