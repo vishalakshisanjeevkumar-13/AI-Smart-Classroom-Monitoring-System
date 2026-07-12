@@ -102,3 +102,27 @@ This repository is intended for educational and demonstration purposes.
 - Automatic attendance reports
 - Multi-camera support
 - Classroom analytics dashboard
+
+## 📸 Project Screenshots
+
+### 🖥️ Dashboard
+
+![Dashboard](screenshots/dashboard.png)
+
+---
+
+### 👨‍🎓 Student Detection
+
+![Student Detection](screenshots/student_detection.png)
+
+---
+
+### 📊 Attendance Counter
+
+![Attendance Counter](screenshots/attendance_counter.png)
+
+---
+
+### 🚨 Alert Banner
+
+![Alert Banner](screenshots/alert_banner.png)
