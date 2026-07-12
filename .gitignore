@@ -6,11 +6,10 @@ venv/
 
 logs/
 screenshots/
-
-attendance_log.csv
-
 *.jpg
 *.png
+
+attendance_log.csv
 
 .idea/
 .vscode/
