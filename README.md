@@ -1,8 +1,9 @@
 # AI Classroom Attendance Counter
 
 ## Team Members
-- Vishalakshi
-- Suroopika
+- Vishalakshi V S
+- Suroopika D
+- Kodhanya D
 
 ## Problem Statement
 Manual attendance consumes valuable classroom time and may lead to human errors. An automated attendance counting system can reduce effort and provide quick classroom occupancy information.
