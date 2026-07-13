@@ -107,19 +107,19 @@ This repository is intended for educational and demonstration purposes.
 
 ### 🖥️ Dashboard
 
-![Dashboard](screenshots/dashboard.png)
+![Dashboard](screenshots/attendance_monitoring_dashboard.png.jpg)
 
 ---
 
 ### 👨‍🎓 Student Detection
 
-![Student Detection](screenshots/student_detection.png)
+![Student Detection](screenshots/student_detection.png.jpg)
 
 ---
 
-### 📊 Attendance Counter
+### 📊 Multi_object_detection
 
-![Attendance Counter](screenshots/attendance_counter.png)
+![Multi_object_detection](screenshots/multi_object_detection.png.png)
 
 ---
 
